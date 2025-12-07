@@ -1,0 +1,15 @@
+# Ignore build outputs
+node_modules
+dist
+.next
+out
+coverage
+build
+
+# Ignore lock files
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# add other files or directories you want to ignore for Prettier
+documentation
