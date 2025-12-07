@@ -1,0 +1,6 @@
+{
+  "pageTitle": "Client Test Report",
+  "outputPath": "./test-report/test-report.html",
+  "includeFailureMsg": true,
+  "includeConsoleLog": true
+}

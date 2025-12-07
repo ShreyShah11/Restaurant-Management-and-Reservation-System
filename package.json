@@ -1,0 +1,29 @@
+{
+    "name": "create-auth-app",
+    "version": "1.0.0",
+    "description": "",
+    "main": "index.js",
+    "type": "module",
+    "scripts": {
+        "format": "prettier --write .",
+        "format:check": "prettier --check .",
+        "lint:fix": "eslint . --fix",
+        "lint": "eslint .",
+        "install:all": "pnpm install && pnpm --filter ./client install && pnpm --filter ./server install",
+        "clean:all": "rm -rf node_modules pnpm-lock.yaml && rm -rf client/node_modules client/pnpm-lock.yaml client/.next && rm -rf server/node_modules server/pnpm-lock.yaml server/build",
+        "refresh:all": "pnpm run clean:all && pnpm run install:all",
+        "dev": "concurrently -n CLIENT,SERVER -c cyan,green \"pnpm --filter client dev\" \"pnpm --filter server dev\""
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "packageManager": "pnpm@10.22.0",
+    "devDependencies": {
+        "@eslint/js": "^9.34.0",
+        "concurrently": "^9.2.1",
+        "eslint": "^9.34.0",
+        "eslint-config-prettier": "^10.1.8",
+        "prettier": "^3.6.2",
+        "typescript-eslint": "^8.40.0"
+    }
+}
