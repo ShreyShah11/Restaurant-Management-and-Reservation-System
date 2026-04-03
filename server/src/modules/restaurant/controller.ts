@@ -664,49 +664,40 @@ const controller = {
             });
 
             type RestaurantTuple = [IRestaurant, string, string[]];
-            const nearByRestaurants: RestaurantTuple[] = [];
 
-            for (const nearUser of nearByUsers) {
-                const isRestaurant = await Restaurant.findOne({ owner: nearUser._id });
-                if (isRestaurant) {
+            const results = await Promise.all(
+                nearByUsers.map(async (nearUser) => {
+                    const isRestaurant = await Restaurant.findOne({ owner: nearUser._id });
+                    if (!isRestaurant) return null;
+
                     const allItem = await Item.find({
                         restaurantID: isRestaurant._id,
                     });
 
-                    if (!allItem) {
-                        nearByRestaurants.push([isRestaurant, nearUser.cityName, []]);
-                        continue;
-                    }
-
-                    const st = new Set<string>();
+                    const cuisines = new Set<string>();
                     for (const item of allItem) {
-                        st.add(item.cuisine);
+                        cuisines.add(item.cuisine);
                     }
 
-                    nearByRestaurants.push([isRestaurant, nearUser.cityName, [...st]]);
-                }
-            }
-
-            nearByRestaurants.sort(
-                (
-                    [restaurantA, cityA]: RestaurantTuple,
-                    [restaurantB, cityB]: RestaurantTuple,
-                ): number => {
-                    if (cityA !== cityB) {
-                        return 0;
-                    }
-
-                    const avgA = restaurantA.ratingsCount
-                        ? restaurantA.ratingsSum / restaurantA.ratingsCount
-                        : 0;
-
-                    const avgB = restaurantB.ratingsCount
-                        ? restaurantB.ratingsSum / restaurantB.ratingsCount
-                        : 0;
-
-                    return avgB - avgA;
-                },
+                    return [isRestaurant, nearUser.cityName, [...cuisines]] as RestaurantTuple;
+                })
             );
+
+            const nearByRestaurants: RestaurantTuple[] = results.filter(
+                (r): r is RestaurantTuple => r !== null
+            );
+
+            nearByRestaurants.sort(([restaurantA], [restaurantB]) => {
+                const avgA = restaurantA.ratingsCount
+                    ? restaurantA.ratingsSum / restaurantA.ratingsCount
+                    : 0;
+
+                const avgB = restaurantB.ratingsCount
+                    ? restaurantB.ratingsSum / restaurantB.ratingsCount
+                    : 0;
+
+                return avgB - avgA;
+            });
 
             if (nearByRestaurants.length === 0) {
                 return res.status(200).json({
