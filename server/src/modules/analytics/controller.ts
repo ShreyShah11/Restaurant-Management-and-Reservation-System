@@ -1,10 +1,16 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import Booking from '@/models/booking';
+import Restaurant from '@/models/restaurant';
 import logger from '@/utils/logger';
 import mongoose from 'mongoose';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+const getOwnerRestaurantIds = async (ownerId: string) => {
+    const restaurants = await Restaurant.find({ owner: new mongoose.Types.ObjectId(ownerId) }).select('_id').lean();
+    return restaurants.map((restaurant: any) => restaurant._id);
+};
 
 const controller = {
     // DAILY SALES (bookings & guests with category breakdown)
@@ -20,12 +26,11 @@ const controller = {
             const to = hasTo ? new Date(parsed.data.to as string) : new Date();
             const from = hasFrom ? new Date(parsed.data.from as string) : new Date(to.getTime() - spanDays * DAY_MS);
             const ownerId = res.locals.userID as string;
+            const restaurantIds = await getOwnerRestaurantIds(ownerId);
+            if (restaurantIds.length === 0) return res.status(200).json({ success: true, data: [] });
 
             const data = await (Booking as any).aggregate([
-                { $match: { status: 'executed', bookingAt: { $gte: from, $lte: to } } },
-                { $lookup: { from: 'restaurants', localField: 'restaurantID', foreignField: '_id', as: 'restaurant' } },
-                { $unwind: '$restaurant' },
-                { $match: { 'restaurant.owner': new mongoose.Types.ObjectId(ownerId) } },
+                { $match: { status: 'executed', bookingAt: { $gte: from, $lte: to }, restaurantID: { $in: restaurantIds } } },
                 {
                     $group: {
                         _id: {
@@ -116,12 +121,10 @@ const controller = {
 
             const from = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000);
             const to = new Date();
+            const restaurantIds = await getOwnerRestaurantIds(ownerId);
 
-            const hist = await (Booking as any).aggregate([
-                { $match: { status: 'executed', bookingAt: { $gte: from, $lte: to } } },
-                { $lookup: { from: 'restaurants', localField: 'restaurantID', foreignField: '_id', as: 'restaurant' } },
-                { $unwind: '$restaurant' },
-                { $match: { 'restaurant.owner': new mongoose.Types.ObjectId(ownerId) } },
+            const hist = restaurantIds.length === 0 ? [] : await (Booking as any).aggregate([
+                { $match: { status: 'executed', bookingAt: { $gte: from, $lte: to }, restaurantID: { $in: restaurantIds } } },
                 { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$bookingAt' } }, guests: { $sum: '$numberOfGuests' } } },
                 { $project: { _id: 0, date: '$_id', guests: 1 } },
                 { $sort: { date: 1 } },
@@ -186,12 +189,18 @@ const controller = {
             if (from > to) return res.status(400).json({ success: false, message: 'Invalid date range' });
 
             const ownerId = res.locals.userID as string;
+            const restaurantIds = await getOwnerRestaurantIds(ownerId);
+            if (restaurantIds.length === 0)
+                return res.status(200).json({
+                    success: true,
+                    data: {
+                        counts: { pending: 0, accepted: 0, 'payment pending': 0, confirmed: 0, executed: 0, rejected: 0 },
+                        conversions: { pending_to_confirmed: 0, confirmed_to_executed: 0, overall_to_executed: 0 },
+                    },
+                });
 
             const rows = await (Booking as any).aggregate([
-                { $match: { bookingAt: { $gte: from, $lte: to } } },
-                { $lookup: { from: 'restaurants', localField: 'restaurantID', foreignField: '_id', as: 'restaurant' } },
-                { $unwind: '$restaurant' },
-                { $match: { 'restaurant.owner': new mongoose.Types.ObjectId(ownerId) } },
+                { $match: { bookingAt: { $gte: from, $lte: to }, restaurantID: { $in: restaurantIds } } },
                 { $group: { _id: '$status', count: { $sum: 1 } } },
                 { $project: { _id: 0, status: '$_id', count: 1 } },
             ]);
@@ -240,19 +249,11 @@ const controller = {
             const to = hasTo ? new Date(parsed.data.to as string) : new Date();
             const from = hasFrom ? new Date(parsed.data.from as string) : new Date(to.getTime() - spanDays * 24 * 60 * 60 * 1000);
             const ownerId = res.locals.userID as string;
+            const restaurantIds = await getOwnerRestaurantIds(ownerId);
+            if (restaurantIds.length === 0) return res.status(200).json({ success: true, data: [] });
 
             const rows = await (Booking as any).aggregate([
-                { $match: { status: 'executed', bookingAt: { $gte: from, $lte: to } } },
-                {
-                    $lookup: {
-                        from: 'restaurants',
-                        localField: 'restaurantID',
-                        foreignField: '_id',
-                        as: 'restaurant',
-                    },
-                },
-                { $unwind: '$restaurant' },
-                { $match: { 'restaurant.owner': new mongoose.Types.ObjectId(ownerId) } },
+                { $match: { status: 'executed', bookingAt: { $gte: from, $lte: to }, restaurantID: { $in: restaurantIds } } },
                 { $group: { _id: '$category', bookings: { $sum: 1 }, guests: { $sum: '$numberOfGuests' } } },
                 { $project: { _id: 0, category: '$_id', bookings: 1, guests: 1 } },
                 { $sort: { category: 1 } },
@@ -286,12 +287,11 @@ const controller = {
             const from = hasFrom ? new Date(parsed.data.from as string) : new Date(to.getTime() - spanDays * DAY_MS);
             if (from > to) return res.status(400).json({ success: false, message: 'Invalid date range' });
             const ownerId = res.locals.userID as string;
+            const restaurantIds = await getOwnerRestaurantIds(ownerId);
+            if (restaurantIds.length === 0) return res.status(200).json({ success: true, data: [] });
 
             const rows = await (Booking as any).aggregate([
-                { $match: { status: 'executed', bookingAt: { $gte: from, $lte: to } } },
-                { $lookup: { from: 'restaurants', localField: 'restaurantID', foreignField: '_id', as: 'restaurant' } },
-                { $unwind: '$restaurant' },
-                { $match: { 'restaurant.owner': new mongoose.Types.ObjectId(ownerId) } },
+                { $match: { status: 'executed', bookingAt: { $gte: from, $lte: to }, restaurantID: { $in: restaurantIds } } },
                 { $group: { _id: { weekday: { $dayOfWeek: '$bookingAt' }, hour: { $hour: '$bookingAt' } }, count: { $sum: 1 } } },
                 { $project: { _id: 0, weekday: '$_id.weekday', hour: '$_id.hour', count: 1 } },
                 { $sort: { weekday: 1, hour: 1 } },
@@ -323,13 +323,22 @@ const controller = {
             const prevTo = new Date(from.getTime());
             const prevFrom = new Date(prevTo.getTime() - spanMs);
             const ownerId = res.locals.userID as string;
+            const restaurantIds = await getOwnerRestaurantIds(ownerId);
+            if (restaurantIds.length === 0) {
+                const emptyTotals = { bookings: 0, guests: 0 };
+                return res.status(200).json({
+                    success: true,
+                    days: Math.max(1, Math.ceil(spanMs / DAY_MS)),
+                    current: emptyTotals,
+                    previous: emptyTotals,
+                    growth: { bookings: 0, guests: 0 },
+                    diff: { bookings: 0, guests: 0 },
+                });
+            }
 
             const agg = async (fromDate: Date, toDate: Date) => (Booking as any)
                 .aggregate([
-                    { $match: { status: 'executed', bookingAt: { $gte: fromDate, $lte: toDate } } },
-                    { $lookup: { from: 'restaurants', localField: 'restaurantID', foreignField: '_id', as: 'restaurant' } },
-                    { $unwind: '$restaurant' },
-                    { $match: { 'restaurant.owner': new mongoose.Types.ObjectId(ownerId) } },
+                    { $match: { status: 'executed', bookingAt: { $gte: fromDate, $lte: toDate }, restaurantID: { $in: restaurantIds } } },
                     { $group: { _id: null, bookings: { $sum: 1 }, guests: { $sum: '$numberOfGuests' } } },
                     { $project: { _id: 0, bookings: 1, guests: 1 } },
                 ])
@@ -374,19 +383,10 @@ const controller = {
                 : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
             const to = parsed.data.to ? new Date(parsed.data.to) : new Date();
             const ownerId = res.locals.userID as string;
+            const restaurantIds = await getOwnerRestaurantIds(ownerId);
 
-            const rows = await (Booking as any).aggregate([
-                { $match: { status: 'executed', bookingAt: { $gte: from, $lte: to } } },
-                {
-                    $lookup: {
-                        from: 'restaurants',
-                        localField: 'restaurantID',
-                        foreignField: '_id',
-                        as: 'restaurant',
-                    },
-                },
-                { $unwind: '$restaurant' },
-                { $match: { 'restaurant.owner': new mongoose.Types.ObjectId(ownerId) } },
+            const rows = restaurantIds.length === 0 ? [] : await (Booking as any).aggregate([
+                { $match: { status: 'executed', bookingAt: { $gte: from, $lte: to }, restaurantID: { $in: restaurantIds } } },
                 { $group: { _id: '$category', bookings: { $sum: 1 }, guests: { $sum: '$numberOfGuests' } } },
                 { $project: { _id: 0, category: '$_id', bookings: 1, guests: 1 } },
                 { $sort: { category: 1 } },
@@ -423,12 +423,17 @@ const controller = {
             const from = hasFrom ? new Date(parsed.data.from as string) : new Date(to.getTime() - spanDays * DAY_MS);
             if (from > to) return res.status(400).json({ success: false, message: 'Invalid date range' });
             const ownerId = res.locals.userID as string;
+            const restaurantIds = await getOwnerRestaurantIds(ownerId);
+
+            if (restaurantIds.length === 0) {
+                const header = 'weekday,hour,count\n';
+                res.setHeader('Content-Type', 'text/csv');
+                res.setHeader('Content-Disposition', 'attachment; filename="heatmap.csv"');
+                return res.status(200).send(header);
+            }
 
             const rows = await (Booking as any).aggregate([
-                { $match: { status: 'executed', bookingAt: { $gte: from, $lte: to } } },
-                { $lookup: { from: 'restaurants', localField: 'restaurantID', foreignField: '_id', as: 'restaurant' } },
-                { $unwind: '$restaurant' },
-                { $match: { 'restaurant.owner': new mongoose.Types.ObjectId(ownerId) } },
+                { $match: { status: 'executed', bookingAt: { $gte: from, $lte: to }, restaurantID: { $in: restaurantIds } } },
                 { $group: { _id: { weekday: { $dayOfWeek: '$bookingAt' }, hour: { $hour: '$bookingAt' } }, count: { $sum: 1 } } },
                 { $project: { _id: 0, weekday: '$_id.weekday', hour: '$_id.hour', count: 1 } },
                 { $sort: { weekday: 1, hour: 1 } },
@@ -456,6 +461,7 @@ const controller = {
             const from = parsed.data.from ? new Date(parsed.data.from) : undefined;
             const to = parsed.data.to ? new Date(parsed.data.to) : undefined;
             const ownerId = res.locals.userID as string;
+            const restaurantIds = await getOwnerRestaurantIds(ownerId);
 
             const matchDates: any = {};
             if (from) matchDates.$gte = from;
@@ -465,11 +471,12 @@ const controller = {
             const statusFilter = { $in: ['accepted', 'confirmed', 'executed'] };
             const matchStage: any = { status: statusFilter };
             if (from || to) matchStage.bookingAt = matchDates;
+            pipeline.push({ $match: matchStage });
+
+            if (restaurantIds.length === 0) return res.status(200).json({ success: true, data: [] });
+
             pipeline.push(
-                { $match: matchStage },
-                { $lookup: { from: 'restaurants', localField: 'restaurantID', foreignField: '_id', as: 'restaurant' } },
-                { $unwind: '$restaurant' },
-                { $match: { 'restaurant.owner': new mongoose.Types.ObjectId(ownerId) } },
+                { $match: { restaurantID: { $in: restaurantIds } } },
                 {
                     $group: {
                         _id: '$userID',
@@ -521,6 +528,7 @@ const controller = {
             const from = parsed.data.from ? new Date(parsed.data.from) : undefined;
             const to = parsed.data.to ? new Date(parsed.data.to) : undefined;
             const ownerId = res.locals.userID as string;
+            const restaurantIds = await getOwnerRestaurantIds(ownerId);
 
             const matchDates: any = {};
             if (from) matchDates.$gte = from;
@@ -530,11 +538,17 @@ const controller = {
             const statusFilter = { $in: ['accepted', 'confirmed', 'executed'] };
             const matchStage: any = { status: statusFilter };
             if (from || to) matchStage.bookingAt = matchDates;
+            pipeline.push({ $match: matchStage });
+
+            if (restaurantIds.length === 0) {
+                const header = 'userID,visits,guests,avgPartySize,segment,churnRisk,firstVisit,lastVisit\n';
+                res.setHeader('Content-Type', 'text/csv');
+                res.setHeader('Content-Disposition', 'attachment; filename="customer-segments.csv"');
+                return res.status(200).send(header);
+            }
+
             pipeline.push(
-                { $match: matchStage },
-                { $lookup: { from: 'restaurants', localField: 'restaurantID', foreignField: '_id', as: 'restaurant' } },
-                { $unwind: '$restaurant' },
-                { $match: { 'restaurant.owner': new mongoose.Types.ObjectId(ownerId) } },
+                { $match: { restaurantID: { $in: restaurantIds } } },
                 {
                     $group: {
                         _id: '$userID',
